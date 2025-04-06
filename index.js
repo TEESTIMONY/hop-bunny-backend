@@ -199,6 +199,17 @@ app.get('/api/scores/me', authMiddleware, async (req, res) => {
   }
 });
 
+// Add a simple health check endpoint that doesn't require DB access
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    message: 'API is running',
+    serverTime: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
+});
+
 // Default route - confirm API is working
 app.get('/', (req, res) => {
   res.json({ message: 'Hop Bunny API is running!' });
@@ -213,16 +224,29 @@ app.get('/api/test', (req, res) => {
 const startServer = async () => {
   try {
     // Use MongoDB connection string from environment variables
-    // Default to a MongoDB Atlas connection if not provided
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://your_mongodb_atlas_connection_string');
+    const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://your_mongodb_atlas_connection_string';
+    console.log('Attempting to connect to MongoDB...');
+    
+    // Add connection options to handle deprecation warnings
+    await mongoose.connect(mongoURI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000 // Timeout after 5s instead of 30s
+    });
+    
     console.log('Connected to MongoDB');
     
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
   } catch (error) {
-    console.error('Server startup error:', error);
-    process.exit(1);
+    console.error('Server startup error:', error.message);
+    console.error('MongoDB connection string:', process.env.MONGODB_URI ? 'String exists but is not shown for security' : 'Connection string is missing');
+    
+    // Start server even if DB connection fails (for debugging API issues)
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT} WITHOUT database connection`);
+    });
   }
 };
 
