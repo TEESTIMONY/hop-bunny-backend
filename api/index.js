@@ -53,6 +53,37 @@ app.get('/api/test', (req, res) => {
   res.json({ success: true, message: 'API connection successful', cors: 'enabled' });
 });
 
+// Test MongoDB connection
+app.get('/api/test-db', async (req, res) => {
+  try {
+    console.log('Testing MongoDB connection...');
+    console.log('MONGODB_URI exists:', !!process.env.MONGODB_URI);
+    
+    // Don't log the full connection string for security reasons
+    if (process.env.MONGODB_URI) {
+      console.log('MONGODB_URI starts with:', process.env.MONGODB_URI.substring(0, 20) + '...');
+    }
+    
+    // Try to connect to MongoDB
+    await connectDB();
+    
+    res.json({
+      status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      message: mongoose.connection.readyState === 1 
+        ? 'Successfully connected to MongoDB' 
+        : 'Failed to connect to MongoDB',
+      readyState: mongoose.connection.readyState
+    });
+  } catch (error) {
+    console.error('MongoDB test error:', error);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error testing MongoDB connection',
+      error: error.message
+    });
+  }
+});
+
 // Mount API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/scores', scoresRoutes);
@@ -64,18 +95,42 @@ const connectDB = async () => {
       const mongoURI = process.env.MONGODB_URI;
       if (!mongoURI) {
         console.error('MONGODB_URI environment variable not set');
-        return;
+        return false;
       }
+      
+      // Check if the URI looks valid
+      if (!mongoURI.startsWith('mongodb+srv://') && !mongoURI.startsWith('mongodb://')) {
+        console.error('MONGODB_URI format appears invalid');
+        return false;
+      }
+      
+      console.log('Connecting to MongoDB...');
       
       await mongoose.connect(mongoURI, {
         useNewUrlParser: true,
-        useUnifiedTopology: true
+        useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 5000 // 5 seconds timeout 
       });
-      console.log('MongoDB connected');
+      
+      console.log('MongoDB connected successfully');
+      return true;
     } catch (error) {
       console.error('MongoDB connection error:', error.message);
+      
+      // More detailed error info for common issues
+      if (error.message.includes('ENOTFOUND')) {
+        console.error('Host not found - check if cluster name is correct');
+      } else if (error.message.includes('Authentication failed')) {
+        console.error('Authentication failed - check username and password');
+      } else if (error.message.includes('timed out')) {
+        console.error('Connection timed out - check network or firewall settings');
+      }
+      
+      return false;
     }
   }
+  
+  return mongoose.connection.readyState === 1;
 };
 
 // Connect to MongoDB before handling requests
