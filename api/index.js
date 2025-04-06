@@ -109,7 +109,7 @@ const connectDB = async () => {
       await mongoose.connect(mongoURI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        serverSelectionTimeoutMS: 5000 // 5 seconds timeout 
+        serverSelectionTimeoutMS: 15000 // Increased from 5000 to 15 seconds
       });
       
       console.log('MongoDB connected successfully');
@@ -143,6 +143,58 @@ app.use(async (req, res, next) => {
 app.use((err, req, res, next) => {
   console.error('API Error:', err);
   res.status(500).json({ message: 'Server error', error: err.message });
+});
+
+// Add debug endpoint
+app.get('/api/debug/mongo', async (req, res) => {
+  try {
+    const mongoURI = process.env.MONGODB_URI;
+    const uriExists = !!mongoURI;
+    let uriPrefix = "not set";
+    let validPrefix = false;
+    
+    if (uriExists) {
+      uriPrefix = mongoURI.substring(0, 12) + '...'; // Show just prefix for security
+      validPrefix = mongoURI.startsWith('mongodb+srv://') || mongoURI.startsWith('mongodb://');
+    }
+    
+    // Attempt connection with longer timeout
+    let connectionResult = "Not attempted";
+    if (uriExists && validPrefix) {
+      try {
+        if (mongoose.connection.readyState === 0) {
+          await mongoose.connect(mongoURI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 15000 // Increase timeout to 15 seconds
+          });
+        }
+        connectionResult = "Connection successful";
+      } catch (connError) {
+        connectionResult = `Connection failed: ${connError.message}`;
+      }
+    }
+    
+    res.json({
+      uriExists,
+      uriPrefix,
+      validPrefix,
+      connectionResult,
+      readyState: mongoose.connection.readyState,
+      readyStateExplained: [
+        'disconnected (0)',
+        'connected (1)',
+        'connecting (2)',
+        'disconnecting (3)'
+      ][mongoose.connection.readyState] || 'unknown',
+      nodeEnv: process.env.NODE_ENV || 'not set',
+      vercelEnv: process.env.VERCEL_ENV || 'not set'
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: `Debug endpoint error: ${error.message}`
+    });
+  }
 });
 
 // Export Express app for Vercel serverless
