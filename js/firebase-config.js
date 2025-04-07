@@ -12,10 +12,28 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-firebase.initializeApp(firebaseConfig);
+try {
+  firebase.initializeApp(firebaseConfig);
+  console.log('Firebase initialized successfully');
+  
+  // Initialize Firebase services
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  
+  // Test authentication state
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      console.log('User is signed in:', user.email);
+    } else {
+      console.log('No user is signed in');
+    }
+  });
 
-// Initialize Firebase services
-const auth = firebase.auth();
-const db = firebase.firestore();
+  // Test database connection
+  db.collection('test').get()
+    .then(() => console.log('Firestore connection successful'))
+    .catch(error => console.error('Firestore connection error:', error));
 
-console.log('Firebase initialized'); 
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+} 
