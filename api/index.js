@@ -158,8 +158,10 @@ app.get('/api/debug/mongo', async (req, res) => {
       validPrefix = mongoURI.startsWith('mongodb+srv://') || mongoURI.startsWith('mongodb://');
     }
     
-    // Attempt connection with longer timeout
+    // More detailed connection test
     let connectionResult = "Not attempted";
+    let detailedDBInfo = {};
+    
     if (uriExists && validPrefix) {
       try {
         if (mongoose.connection.readyState === 0) {
@@ -169,9 +171,93 @@ app.get('/api/debug/mongo', async (req, res) => {
             serverSelectionTimeoutMS: 15000 // Increase timeout to 15 seconds
           });
         }
-        connectionResult = "Connection successful";
+        
+        // Try to write to a test collection to verify permissions
+        const testCollection = mongoose.connection.db.collection('connection_tests');
+        const writeResult = await testCollection.insertOne({
+          test: true,
+          date: new Date(),
+          source: 'debug-endpoint'
+        });
+        
+        // If we get here, write succeeded
+        connectionResult = "Full connection successful with write operation";
+        
+        // Try to read the document back
+        const readResult = await testCollection.findOne({ test: true });
+        
+        // Get database information
+        const dbAdmin = mongoose.connection.db.admin();
+        let buildInfo = { ok: false };
+        try {
+          buildInfo = await dbAdmin.buildInfo();
+        } catch (adminError) {
+          buildInfo = { 
+            error: adminError.message,
+            note: "This is normal if your user doesn't have admin privileges" 
+          };
+        }
+        
+        // Get database stats
+        let dbStats = { ok: false };
+        try {
+          dbStats = await mongoose.connection.db.stats();
+        } catch (statsError) {
+          dbStats = { error: statsError.message };
+        }
+        
+        // Get collection information
+        let collections = [];
+        try {
+          collections = await mongoose.connection.db.listCollections().toArray();
+        } catch (collectionsError) {
+          collections = [{ error: collectionsError.message }];
+        }
+        
+        detailedDBInfo = {
+          databaseName: mongoose.connection.db.databaseName,
+          collections: collections.map(c => c.name || c.error),
+          writeResult: writeResult.acknowledged ? "Success" : "Failed",
+          readResult: readResult ? "Success" : "Failed",
+          dbStats: dbStats,
+          buildInfo: {
+            version: buildInfo.version,
+            gitVersion: buildInfo.gitVersion
+          }
+        };
       } catch (connError) {
         connectionResult = `Connection failed: ${connError.message}`;
+        
+        // Add more detailed error info
+        if (connError.message.includes('Authentication failed')) {
+          connectionResult += ' - Check username and password in connection string';
+        } else if (connError.message.includes('ENOTFOUND')) {
+          connectionResult += ' - Host not found, check cluster name in connection string';
+        } else if (connError.message.includes('timed out')) {
+          connectionResult += ' - Connection timed out, check network settings and IP whitelist';
+        } else if (connError.message.includes('user is not allowed')) {
+          connectionResult += ' - User lacks necessary permissions for database operations';
+        } else if (connError.message.includes('Access to storage')) {
+          connectionResult += ' - Storage access not allowed, check collection permissions';
+        }
+      }
+    }
+    
+    // Format MongoDB URI for diagnosis (without showing credentials)
+    let uriDiagnosis = "Not available";
+    if (uriExists) {
+      try {
+        const url = new URL(mongoURI);
+        uriDiagnosis = {
+          protocol: url.protocol,
+          host: url.host,
+          pathname: url.pathname,
+          hasUsername: !!url.username,
+          hasPassword: !!url.password,
+          searchParams: Object.fromEntries(url.searchParams)
+        };
+      } catch (urlError) {
+        uriDiagnosis = `Error parsing URI: ${urlError.message}`;
       }
     }
     
@@ -179,6 +265,7 @@ app.get('/api/debug/mongo', async (req, res) => {
       uriExists,
       uriPrefix,
       validPrefix,
+      uriDiagnosis,
       connectionResult,
       readyState: mongoose.connection.readyState,
       readyStateExplained: [
@@ -187,6 +274,7 @@ app.get('/api/debug/mongo', async (req, res) => {
         'connecting (2)',
         'disconnecting (3)'
       ][mongoose.connection.readyState] || 'unknown',
+      detailedDBInfo,
       nodeEnv: process.env.NODE_ENV || 'not set',
       vercelEnv: process.env.VERCEL_ENV || 'not set'
     });

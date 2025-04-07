@@ -167,4 +167,57 @@ router.post('/debug-register', async (req, res) => {
   }
 });
 
+// Simplified test registration - bypasses some complexities
+router.post('/test-register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    
+    // Basic validation
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+    
+    // Create a direct MongoDB document to test database writes
+    const db = mongoose.connection.db;
+    
+    // Check if users collection exists, create it if not
+    const collections = await db.listCollections({ name: 'users' }).toArray();
+    if (collections.length === 0) {
+      console.log('Creating users collection');
+      await db.createCollection('users');
+    }
+    
+    // Get the users collection
+    const usersCollection = db.collection('users');
+    
+    // Create a simplified user document
+    const userDoc = {
+      username,
+      email,
+      password: 'simplified_test', // Not hashing for this test
+      createdAt: new Date()
+    };
+    
+    // Attempt to insert the document
+    const result = await usersCollection.insertOne(userDoc);
+    
+    // Respond with success
+    res.status(201).json({
+      message: 'Test user created successfully',
+      userId: result.insertedId.toString(),
+      mongoResult: result
+    });
+  } catch (error) {
+    console.error('Test registration error:', error);
+    
+    // Provide detailed error information
+    res.status(500).json({
+      message: 'Server error during test registration',
+      error: error.message,
+      mongoState: mongoose.connection.readyState,
+      stack: error.stack
+    });
+  }
+});
+
 module.exports = router; 
